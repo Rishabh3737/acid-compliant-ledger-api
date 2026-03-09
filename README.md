@@ -1,14 +1,17 @@
-# Simple ACID-Compliant Ledger API
+# Advanced ACID-Compliant Ledger API
 
 A lightweight, stateless PHP microservice for securely managing virtual wallets, loyalty points, or financial transactions. 
 
 Whether you are building a custom client management platform, tracking member credits for a SaaS application, or upgrading a simple online banking project, handling digital currency requires strict data integrity. This API uses native PDO and strict MySQL/MariaDB `InnoDB` transactions to guarantee ACID compliance—meaning if a server crashes halfway through a transfer, no funds are lost or duplicated.
 
+
+
 ## 🚀 Features
 
 * **Strict ACID Transactions:** Uses `START TRANSACTION`, row-level locking (`FOR UPDATE`), and `ROLLBACK` to ensure zero race conditions or double-spending.
-* **Stateless Architecture:** Easy to drop into existing PHP projects or run as a standalone microservice.
-* **Full History Ledger:** Maintains an immutable log of all transfers, deposits, and withdrawals.
+* **Deposits & Withdrawals:** Safely inject or remove funds from the ecosystem.
+* **Account Status Controls:** Native support for locking/freezing accounts to prevent unauthorized transfers.
+* **Paginated History Ledger:** Maintains an immutable log of all transfers, deposits, and withdrawals, optimized for massive datasets.
 * **Zero Dependencies:** Pure PHP 8.1+ and PDO. No bloated frameworks required.
 
 ## 🛠 Prerequisites
@@ -20,103 +23,112 @@ Whether you are building a custom client management platform, tracking member cr
 ## 📦 Installation & Setup
 
 1. **Clone the repository:**
-~~~bash
-git clone https://github.com/Rishabh3737/acid-compliant-ledger-api.git
-cd acid-compliant-ledger-api
-~~~
+   ```bash
+   git clone https://github.com/Rishabh3737/acid-compliant-ledger-api.git
+   cd acid-compliant-ledger-api
+   ```
 
 2. **Database Setup:**
-Create a new database and import the `schema.sql` file to generate the `accounts` and `transactions` tables. You can run the following via your terminal or database client:
-~~~bash
-mysql -u root -p my_database < schema.sql
-~~~
-
-*Alternatively, manually execute the following `schema.sql` contents:*
-~~~sql
-CREATE TABLE accounts (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    balance DECIMAL(10, 2) DEFAULT 0.00,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-
-CREATE TABLE transactions (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    sender_account_id INT NULL,
-    receiver_account_id INT NULL,
-    amount DECIMAL(10, 2) NOT NULL,
-    type ENUM('transfer', 'deposit', 'withdrawal') NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-~~~
+   Create a new database and import the `schema.sql` file to generate the `accounts` and `transactions` tables. You can run the following via your terminal or database client:
+   ```bash
+   mysql -u root -p my_database < schema.sql
+   ```
 
 3. **Configure Connection:**
-Open `index.php` and update the PDO connection variables at the bottom of the file with your local database credentials.
+   Open `index.php` and update the PDO connection variables at the bottom of the file with your local database credentials.
 
 4. **Run the server:**
-~~~bash
-php -S localhost:8000
-~~~
+   ```bash
+   php -S localhost:8000
+   ```
 
 ## 📡 API Endpoints
 
 ### 1. Check Account Balance
-Retrieves the current balance for a specific account.
+Retrieves the current balance and account status (active, frozen, or closed).
 
 **Request:**
 `GET /api/v1/accounts/{id}/balance`
 
 **Response:**
-~~~json
+```json
 {
   "account_id": 1042,
-  "balance": "150.00"
+  "balance": "150.00",
+  "status": "active"
 }
-~~~
+```
 
-### 2. Transfer Funds
-Moves funds safely between two accounts. If the sender has insufficient funds, or if the database connection drops mid-query, the entire transaction is rolled back safely.
+### 2. Deposit Funds
+Adds money to a specific account from an external source.
+
+**Request:**
+`POST /api/v1/accounts/{id}/deposit`
+```json
+{
+  "amount": 100.00
+}
+```
+
+### 3. Withdraw Funds
+Removes money from a specific account. Fails safely if the account has insufficient funds or is frozen.
+
+**Request:**
+`POST /api/v1/accounts/{id}/withdraw`
+```json
+{
+  "amount": 25.50
+}
+```
+
+### 4. Transfer Funds
+Moves funds safely between two accounts. Uses row-level locking on both accounts to prevent race conditions.
 
 **Request:**
 `POST /api/v1/transactions/transfer`
-~~~json
+```json
 {
   "sender_id": 1042,
   "receiver_id": 883,
   "amount": 50.00
 }
-~~~
+```
 
 **Response (Success):**
-~~~json
+```json
 {
   "status": "success",
   "message": "Transferred $50.00 successfully."
 }
-~~~
+```
 
-### 3. Get Transaction History
-Retrieves the most recent ledger activity for an account.
+### 5. Get Transaction History (Paginated)
+Retrieves the ledger activity for an account. Supports dynamic pagination.
 
 **Request:**
-`GET /api/v1/accounts/{id}/history`
+`GET /api/v1/accounts/{id}/history?page=1&limit=20`
 
 **Response:**
-~~~json
-[
-  {
-    "id": 549,
-    "sender_account_id": 1042,
-    "receiver_account_id": 883,
-    "amount": "50.00",
-    "type": "transfer",
-    "timestamp": "2026-03-09 14:30:00"
-  }
-]
-~~~
+```json
+{
+  "account_id": 1042,
+  "page": 1,
+  "limit": 20,
+  "data": [
+    {
+      "id": 549,
+      "sender_account_id": 1042,
+      "receiver_account_id": 883,
+      "amount": "50.00",
+      "type": "transfer",
+      "timestamp": "2026-03-09 14:30:00"
+    }
+  ]
+}
+```
 
 ## 🛡️ Security Notes
-This repo is designed as a foundational microservice. In a production environment, you should wrap the `LedgerAPI` endpoints in an authentication middleware (such as JWT) to ensure users can only trigger transfers from their own authenticated `sender_id`.
+This repo is designed as a foundational microservice. In a production environment, you should wrap the `LedgerAPI` endpoints in an authentication middleware (such as JWT) to ensure users can only trigger transfers or withdrawals from their own authenticated `sender_id`.
 
 ## 📄 License
 This project is open-source and available under the [MIT License](LICENSE).
