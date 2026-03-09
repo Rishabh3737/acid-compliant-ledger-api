@@ -1,23 +1,6 @@
 <?php
 /**
  * Advanced ACID-Compliant Ledger API
- * --------------------------------
- * * DATABASE SCHEMA:
- * * CREATE TABLE accounts (
- * id INT AUTO_INCREMENT PRIMARY KEY,
- * user_id INT NOT NULL,
- * balance DECIMAL(10, 2) DEFAULT 0.00,
- * status ENUM('active', 'frozen', 'closed') DEFAULT 'active',
- * created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
- * ) ENGINE=InnoDB;
- * * CREATE TABLE transactions (
- * id INT AUTO_INCREMENT PRIMARY KEY,
- * sender_account_id INT NULL,
- * receiver_account_id INT NULL,
- * amount DECIMAL(10, 2) NOT NULL,
- * type ENUM('transfer', 'deposit', 'withdrawal') NOT NULL,
- * timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
- * ) ENGINE=InnoDB;
  */
 
 header('Content-Type: application/json');
@@ -217,6 +200,7 @@ class LedgerAPI {
 // 2. THE ROUTER (Endpoint Handling)
 // ==========================================
 
+// Developers pulling this repo will replace these with their own credentials
 $db_host = 'localhost';
 $db_name = 'ledger_db';
 $db_user = 'root';
