@@ -21,8 +21,8 @@ Whether you are building a custom client management platform, tracking member cr
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/acid-ledger-api.git
-   cd acid-ledger-api
+   git clone https://github.com/Rishabh3737/acid-compliant-ledger-api.git
+   cd acid-compliant-ledger-api
    ```
 
 2. **Database Setup:**
