@@ -20,21 +20,43 @@ Whether you are building a custom client management platform, tracking member cr
 ## 📦 Installation & Setup
 
 1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Rishabh3737/acid-compliant-ledger-api.git
-   cd acid-compliant-ledger-api
-   ```
+~~~bash
+git clone https://github.com/Rishabh3737/acid-compliant-ledger-api.git
+cd acid-compliant-ledger-api
+~~~
 
 2. **Database Setup:**
-   Create a new database and run the provided SQL schema (found at the top of `index.php`) to generate the `accounts` and `transactions` tables.
+Create a new database and import the `schema.sql` file to generate the `accounts` and `transactions` tables. You can run the following via your terminal or database client:
+~~~bash
+mysql -u root -p my_database < schema.sql
+~~~
+
+*Alternatively, manually execute the following `schema.sql` contents:*
+~~~sql
+CREATE TABLE accounts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    balance DECIMAL(10, 2) DEFAULT 0.00,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE transactions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sender_account_id INT NULL,
+    receiver_account_id INT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    type ENUM('transfer', 'deposit', 'withdrawal') NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+~~~
 
 3. **Configure Connection:**
-   Open `index.php` and update the PDO connection variables at the bottom of the file with your local database credentials.
+Open `index.php` and update the PDO connection variables at the bottom of the file with your local database credentials.
 
 4. **Run the server:**
-   ```bash
-   php -S localhost:8000
-   ```
+~~~bash
+php -S localhost:8000
+~~~
 
 ## 📡 API Endpoints
 
@@ -45,33 +67,33 @@ Retrieves the current balance for a specific account.
 `GET /api/v1/accounts/{id}/balance`
 
 **Response:**
-```json
+~~~json
 {
   "account_id": 1042,
   "balance": "150.00"
 }
-```
+~~~
 
 ### 2. Transfer Funds
 Moves funds safely between two accounts. If the sender has insufficient funds, or if the database connection drops mid-query, the entire transaction is rolled back safely.
 
 **Request:**
 `POST /api/v1/transactions/transfer`
-```json
+~~~json
 {
   "sender_id": 1042,
   "receiver_id": 883,
   "amount": 50.00
 }
-```
+~~~
 
 **Response (Success):**
-```json
+~~~json
 {
   "status": "success",
   "message": "Transferred $50.00 successfully."
 }
-```
+~~~
 
 ### 3. Get Transaction History
 Retrieves the most recent ledger activity for an account.
@@ -80,7 +102,7 @@ Retrieves the most recent ledger activity for an account.
 `GET /api/v1/accounts/{id}/history`
 
 **Response:**
-```json
+~~~json
 [
   {
     "id": 549,
@@ -91,7 +113,7 @@ Retrieves the most recent ledger activity for an account.
     "timestamp": "2026-03-09 14:30:00"
   }
 ]
-```
+~~~
 
 ## 🛡️ Security Notes
 This repo is designed as a foundational microservice. In a production environment, you should wrap the `LedgerAPI` endpoints in an authentication middleware (such as JWT) to ensure users can only trigger transfers from their own authenticated `sender_id`.
