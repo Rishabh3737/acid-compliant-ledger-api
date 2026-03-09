@@ -1,12 +1,13 @@
 <?php
 /**
- * Simple ACID-Compliant Ledger API
+ * Advanced ACID-Compliant Ledger API
  * --------------------------------
- * * DATABASE SCHEMA: Run this in your MySQL/MariaDB client first.
+ * * DATABASE SCHEMA:
  * * CREATE TABLE accounts (
  * id INT AUTO_INCREMENT PRIMARY KEY,
  * user_id INT NOT NULL,
  * balance DECIMAL(10, 2) DEFAULT 0.00,
+ * status ENUM('active', 'frozen', 'closed') DEFAULT 'active',
  * created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
  * ) ENGINE=InnoDB;
  * * CREATE TABLE transactions (
@@ -36,7 +37,7 @@ class LedgerAPI {
     }
 
     public function getBalance(int $accountId): array {
-        $stmt = $this->db->prepare("SELECT balance FROM accounts WHERE id = ?");
+        $stmt = $this->db->prepare("SELECT balance, status FROM accounts WHERE id = ?");
         $stmt->execute([$accountId]);
         $account = $stmt->fetch();
 
@@ -45,43 +46,146 @@ class LedgerAPI {
             return ["error" => "Account not found"];
         }
 
-        return ["account_id" => $accountId, "balance" => $account['balance']];
+        return [
+            "account_id" => $accountId, 
+            "balance" => $account['balance'],
+            "status" => $account['status']
+        ];
     }
 
-    public function getHistory(int $accountId): array {
+    public function getHistory(int $accountId, int $page = 1, int $limit = 20): array {
+        $offset = ($page - 1) * $limit;
+        
         $stmt = $this->db->prepare("
             SELECT * FROM transactions 
-            WHERE sender_account_id = ? OR receiver_account_id = ? 
-            ORDER BY timestamp DESC LIMIT 50
+            WHERE sender_account_id = :id OR receiver_account_id = :id 
+            ORDER BY timestamp DESC LIMIT :limit OFFSET :offset
         ");
-        $stmt->execute([$accountId, $accountId]);
-        return $stmt->fetchAll();
+        
+        $stmt->bindValue(':id', $accountId, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        
+        return [
+            "account_id" => $accountId,
+            "page" => $page,
+            "limit" => $limit,
+            "data" => $stmt->fetchAll()
+        ];
     }
 
-    public function transferFunds(int $senderId, int $receiverId, float $amount): array {
+    public function depositFunds(int $accountId, float $amount): array {
         if ($amount <= 0) {
             http_response_code(400);
-            return ["error" => "Transfer amount must be greater than zero."];
-        }
-
-        if ($senderId === $receiverId) {
-            http_response_code(400);
-            return ["error" => "Cannot transfer funds to the same account."];
+            return ["error" => "Deposit amount must be greater than zero."];
         }
 
         try {
-            // Start the strict transaction
             $this->db->beginTransaction();
 
-            // Lock the sender's row (FOR UPDATE)
-            $stmt = $this->db->prepare("SELECT balance FROM accounts WHERE id = ? FOR UPDATE");
+            $stmt = $this->db->prepare("SELECT status FROM accounts WHERE id = ? FOR UPDATE");
+            $stmt->execute([$accountId]);
+            $account = $stmt->fetch();
+
+            if (!$account || $account['status'] !== 'active') {
+                $this->db->rollBack();
+                http_response_code(403);
+                return ["error" => "Account is invalid, frozen, or closed."];
+            }
+
+            $stmt = $this->db->prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?");
+            $stmt->execute([$amount, $accountId]);
+
+            $stmt = $this->db->prepare("
+                INSERT INTO transactions (receiver_account_id, amount, type) 
+                VALUES (?, ?, 'deposit')
+            ");
+            $stmt->execute([$accountId, $amount]);
+
+            $this->db->commit();
+            return ["status" => "success", "message" => "Deposited $" . number_format($amount, 2)];
+
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            http_response_code(500);
+            return ["error" => "Deposit failed: " . $e->getMessage()];
+        }
+    }
+
+    public function withdrawFunds(int $accountId, float $amount): array {
+        if ($amount <= 0) {
+            http_response_code(400);
+            return ["error" => "Withdrawal amount must be greater than zero."];
+        }
+
+        try {
+            $this->db->beginTransaction();
+
+            $stmt = $this->db->prepare("SELECT balance, status FROM accounts WHERE id = ? FOR UPDATE");
+            $stmt->execute([$accountId]);
+            $account = $stmt->fetch();
+
+            if (!$account || $account['status'] !== 'active') {
+                $this->db->rollBack();
+                http_response_code(403);
+                return ["error" => "Account is invalid, frozen, or closed."];
+            }
+
+            if ($account['balance'] < $amount) {
+                $this->db->rollBack();
+                http_response_code(400);
+                return ["error" => "Insufficient funds for withdrawal."];
+            }
+
+            $stmt = $this->db->prepare("UPDATE accounts SET balance = balance - ? WHERE id = ?");
+            $stmt->execute([$amount, $accountId]);
+
+            $stmt = $this->db->prepare("
+                INSERT INTO transactions (sender_account_id, amount, type) 
+                VALUES (?, ?, 'withdrawal')
+            ");
+            $stmt->execute([$accountId, $amount]);
+
+            $this->db->commit();
+            return ["status" => "success", "message" => "Withdrew $" . number_format($amount, 2)];
+
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            http_response_code(500);
+            return ["error" => "Withdrawal failed: " . $e->getMessage()];
+        }
+    }
+
+    public function transferFunds(int $senderId, int $receiverId, float $amount): array {
+        if ($amount <= 0 || $senderId === $receiverId) {
+            http_response_code(400);
+            return ["error" => "Invalid transfer parameters."];
+        }
+
+        try {
+            $this->db->beginTransaction();
+
+            // Lock the sender's row
+            $stmt = $this->db->prepare("SELECT balance, status FROM accounts WHERE id = ? FOR UPDATE");
             $stmt->execute([$senderId]);
             $sender = $stmt->fetch();
 
-            if (!$sender || $sender['balance'] < $amount) {
+            if (!$sender || $sender['status'] !== 'active' || $sender['balance'] < $amount) {
                 $this->db->rollBack();
                 http_response_code(400);
-                return ["error" => "Insufficient funds or invalid sender."];
+                return ["error" => "Insufficient funds or sender account is not active."];
+            }
+
+            // Lock the receiver's row
+            $stmt = $this->db->prepare("SELECT status FROM accounts WHERE id = ? FOR UPDATE");
+            $stmt->execute([$receiverId]);
+            $receiver = $stmt->fetch();
+
+            if (!$receiver || $receiver['status'] !== 'active') {
+                $this->db->rollBack();
+                http_response_code(400);
+                return ["error" => "Receiver account is invalid or not active."];
             }
 
             // Execute transfers
@@ -98,18 +202,11 @@ class LedgerAPI {
             ");
             $stmt->execute([$senderId, $receiverId, $amount]);
 
-            // Save all changes
             $this->db->commit();
-
-            return [
-                "status" => "success",
-                "message" => "Transferred $" . number_format($amount, 2) . " successfully."
-            ];
+            return ["status" => "success", "message" => "Transferred $" . number_format($amount, 2) . " successfully."];
 
         } catch (Exception $e) {
-            if ($this->db->inTransaction()) {
-                $this->db->rollBack();
-            }
+            if ($this->db->inTransaction()) $this->db->rollBack();
             http_response_code(500);
             return ["error" => "Transaction failed: " . $e->getMessage()];
         }
@@ -120,7 +217,6 @@ class LedgerAPI {
 // 2. THE ROUTER (Endpoint Handling)
 // ==========================================
 
-// Update these with your local database credentials
 $db_host = 'localhost';
 $db_name = 'ledger_db';
 $db_user = 'root';
@@ -143,9 +239,35 @@ if ($method === 'GET' && preg_match('#^/api/v1/accounts/(\d+)/balance$#', $uri, 
     exit;
 }
 
-// ROUTE: GET /api/v1/accounts/{id}/history
+// ROUTE: GET /api/v1/accounts/{id}/history?page=1&limit=20
 if ($method === 'GET' && preg_match('#^/api/v1/accounts/(\d+)/history$#', $uri, $matches)) {
-    echo json_encode($api->getHistory((int)$matches[1]));
+    $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+    $limit = isset($_GET['limit']) ? max(1, (int)$_GET['limit']) : 20;
+    echo json_encode($api->getHistory((int)$matches[1], $page, $limit));
+    exit;
+}
+
+// ROUTE: POST /api/v1/accounts/{id}/deposit
+if ($method === 'POST' && preg_match('#^/api/v1/accounts/(\d+)/deposit$#', $uri, $matches)) {
+    $data = json_decode(file_get_contents('php://input'), true);
+    if (!isset($data['amount'])) {
+        http_response_code(400);
+        echo json_encode(["error" => "Missing amount."]);
+        exit;
+    }
+    echo json_encode($api->depositFunds((int)$matches[1], (float)$data['amount']));
+    exit;
+}
+
+// ROUTE: POST /api/v1/accounts/{id}/withdraw
+if ($method === 'POST' && preg_match('#^/api/v1/accounts/(\d+)/withdraw$#', $uri, $matches)) {
+    $data = json_decode(file_get_contents('php://input'), true);
+    if (!isset($data['amount'])) {
+        http_response_code(400);
+        echo json_encode(["error" => "Missing amount."]);
+        exit;
+    }
+    echo json_encode($api->withdrawFunds((int)$matches[1], (float)$data['amount']));
     exit;
 }
 
